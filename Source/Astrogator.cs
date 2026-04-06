@@ -77,6 +77,10 @@ namespace Astrogator {
 			// Recalculate model when delta V numbers are updated
 			GameEvents.onDeltaVCalcsCompleted.Add(OnDeltaVCalcsCompleted);
 
+			GameEvents.onVesselGoOffRails.Add(OnVesselRailsChange);
+			GameEvents.onVesselGoOnRails.Add(OnVesselRailsChange);
+			GameEvents.onVesselDestroy.Add(OnVesselDestroyed);
+
 			// This event fires on SOI change
 			if (FlightGlobals.ActiveVessel != null) {
 				VesselMode = true;
@@ -126,6 +130,10 @@ namespace Astrogator {
 
 			// Recalculate model when delta V numbers are updated
 			GameEvents.onDeltaVCalcsCompleted.Remove(OnDeltaVCalcsCompleted);
+
+			GameEvents.onVesselGoOffRails.Remove(OnVesselRailsChange);
+			GameEvents.onVesselGoOnRails.Remove(OnVesselRailsChange);
+			GameEvents.onVesselDestroy.Remove(OnVesselDestroyed);
 
 			// The launcher destroyed event doesn't always fire when we need it (?)
 			RemoveLauncher();
@@ -215,6 +223,44 @@ namespace Astrogator {
 		private AstrogationLoadBehaviorette loader        { get; set; }
 		private AstrogationView             view          { get; set; }
 		private bool                        needViewOpen  { get; set; }
+
+		private double lastOrbitReloadUt = double.NegativeInfinity;
+		private const double MinOrbitReloadInterval = 0.6;
+
+		private void RequestTransferReload(bool urgent)
+		{
+			if (model == null || loader == null) {
+				return;
+			}
+			double ut = Planetarium.GetUniversalTime();
+			if (!urgent && ut - lastOrbitReloadUt < MinOrbitReloadInterval) {
+				return;
+			}
+			lastOrbitReloadUt = ut;
+			loader.TryStartLoad(
+				model.origin ?? (ITargetable)FlightGlobals.ActiveVessel ?? (ITargetable)FlightGlobals.getMainBody(),
+				null,
+				ResetViewBackground,
+				null,
+				urgent);
+		}
+
+		private void OnVesselRailsChange(Vessel v)
+		{
+			if (VesselMode && v != null && v == FlightGlobals.ActiveVessel && model != null && view != null) {
+				RequestTransferReload(true);
+			}
+		}
+
+		private void OnVesselDestroyed(Vessel v)
+		{
+			if (!VesselMode || v == null || model == null) {
+				return;
+			}
+			if (model.origin is Vessel ov && ov == v) {
+				RequestTransferReload(true);
+			}
+		}
 
 		/// <summary>
 		/// Open the main window listing transfers.
@@ -391,15 +437,27 @@ namespace Astrogator {
 					&& FlightGlobals.ActiveVessel != null
 					&& !FlightGlobals.ActiveVessel.ActionGroups[KSPActionGroup.RCS]) {
 
-				foreach (KeyValuePair<KeyBinding, KeyPressedCallback> k in keys) {
-					if (k.Key.GetKey()) {
-						k.Value(model);
+				Vessel av = FlightGlobals.ActiveVessel;
+				bool allowTranslationAdjust = true;
+				try {
+					if (av.connection != null && !av.connection.IsConnected) {
+						allowTranslationAdjust = false;
 					}
+				} catch {
+					allowTranslationAdjust = false;
 				}
-				foreach (KeyValuePair<AxisBinding, AxisCallback> a in axes) {
-					double val = a.Key.GetAxis();
-					if (val != 0) {
-						a.Value(model, val);
+
+				if (allowTranslationAdjust) {
+					foreach (KeyValuePair<KeyBinding, KeyPressedCallback> k in keys) {
+						if (k.Key.GetKey()) {
+							k.Value(model);
+						}
+					}
+					foreach (KeyValuePair<AxisBinding, AxisCallback> a in axes) {
+						double val = a.Key.GetAxis();
+						if (val != 0) {
+							a.Value(model, val);
+						}
 					}
 				}
 			}
@@ -414,8 +472,8 @@ namespace Astrogator {
 				// Check for changes in vessel's orbit
 
 				if (OrbitChanged()) {
-					OnOrbitChanged();
 					prevOrbit = new OrbitModel(FlightGlobals.ActiveVessel.orbit);
+					RequestTransferReload(false);
 				}
 
 				if (TargetChanged()) {
@@ -453,9 +511,7 @@ namespace Astrogator {
 			if (model != null) {
 				if (!model.HasDestination(FlightGlobals.fetch.VesselTarget)) {
 					DbgFmt("OnTargetChanged");
-					loader.TryStartLoad(
-						model.origin ?? (ITargetable)FlightGlobals.ActiveVessel ?? (ITargetable)FlightGlobals.getMainBody(),
-						null, ResetViewBackground, null);
+					RequestTransferReload(true);
 				}
 			}
 		}
@@ -470,20 +526,11 @@ namespace Astrogator {
 					|| !prevOrbit.Equals(FlightGlobals.ActiveVessel.orbit));
 		}
 
-		private void OnOrbitChanged()
-		{
-			loader.TryStartLoad(
-				model.origin ?? (ITargetable)FlightGlobals.ActiveVessel ?? (ITargetable)FlightGlobals.getMainBody(),
-				null, ResetViewBackground, null);
-		}
-
 		private void OnSituationChanged(GameEvents.HostedFromToAction<Vessel, Vessel.Situations> e)
 		{
 			if (model != null && view != null && e.host == FlightGlobals.ActiveVessel) {
 				DbgFmt("Situation of {0} changed from {1} to {2}", TheName(e.host), e.from, e.to);
-				loader.TryStartLoad(
-					e.host ?? (ITargetable)FlightGlobals.ActiveVessel ?? (ITargetable)FlightGlobals.getMainBody(),
-					null, ResetViewBackground, null);
+				RequestTransferReload(true);
 			}
 		}
 
@@ -499,10 +546,7 @@ namespace Astrogator {
 		{
 			if (model != null && view != null) {
 				DbgFmt("Entered {0}'s sphere of influence", TheName(newBody));
-				// The old list no longer applies because reachable bodies depend on current SOI
-				loader.TryStartLoad(
-					model.origin ?? (ITargetable)FlightGlobals.ActiveVessel ?? (ITargetable)FlightGlobals.getMainBody(),
-					null, ResetViewBackground, null);
+				RequestTransferReload(true);
 			}
 		}
 

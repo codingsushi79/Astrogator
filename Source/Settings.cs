@@ -12,6 +12,16 @@ namespace Astrogator {
 	using MonoBehavior = UnityEngine.MonoBehaviour;
 
 	/// <summary>
+	/// How to pick the next transfer window for same-parent moon encounters.
+	/// </summary>
+	public enum TransferPathPlanMode {
+		/// <summary>Minimum delta-V / standard Hohmann-style window (soonest valid).</summary>
+		Efficient = 0,
+		/// <summary>Skip to the next synodic window (approximation of a free-return style timing).</summary>
+		FreeReturn = 1
+	}
+
+	/// <summary>
 	/// Wrapper around ConfigNode for our .settings file.
 	/// </summary>
 	public class Settings : MonoBehavior {
@@ -167,6 +177,34 @@ namespace Astrogator {
 		/// Only applies when RCS is turned off!
 		/// </summary>
 		[Persistent] public bool TranslationAdjust = true;
+
+		/// <summary>
+		/// Whether to prefer the first efficient window or the next window for free-return-style transfers.
+		/// Only affects direct transfers to the assist body selected by <see cref="FreeReturnAssistBodyIndex"/>.
+		/// </summary>
+		[Persistent] public int PathPlanModeValue = (int)TransferPathPlanMode.Efficient;
+
+		/// <summary>
+		/// Index into the parent body's moons (sorted by semi-major axis) used as the free-return swing-by target.
+		/// </summary>
+		[Persistent] public int FreeReturnAssistBodyIndex = 0;
+
+		/// <summary>
+		/// When true, plane-match delta-V is combined into the ejection maneuver node instead of a separate node.
+		/// </summary>
+		[Persistent] public bool MergePlaneChangeIntoEjection = false;
+
+		/// <summary>
+		/// Parsed path plan mode (backed by <see cref="PathPlanModeValue"/> for persistence).
+		/// </summary>
+		public TransferPathPlanMode PathPlanMode {
+			get {
+				return Enum.IsDefined(typeof(TransferPathPlanMode), PathPlanModeValue)
+					? (TransferPathPlanMode)PathPlanModeValue
+					: TransferPathPlanMode.Efficient;
+			}
+			set { PathPlanModeValue = (int)value; }
+		}
 
 	}
 

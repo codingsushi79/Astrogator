@@ -139,7 +139,7 @@ namespace Astrogator {
 
 					case ContentEnum.PlanetName:
 						AddChild(LabelWithStyleAndSize(
-							Localizer.Format("astrogator_planetLabel", TheName(model.destination)),
+							Localizer.Format("astrogator_planetLabel", DisplayNameMidSentence(model.destination)),
 							col.contentStyle, col.width));
 						break;
 

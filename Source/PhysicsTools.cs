@@ -82,7 +82,8 @@ namespace Astrogator {
 			// Now add another linear correction factor based on atmospheric pressure at sea level.
 			// This brings Kerbin's launch dV very close to correct, and everything else but Duna
 			// to within 20%. Duna is a 30% undershoot.
-			double atmoCorrection = body.atmosphere ? 12 * body.atmospherePressureSeaLevel : 0;
+			// Slightly higher weight improves Kerbin LKO agreement; still a coarse model.
+			double atmoCorrection = body.atmosphere ? 13 * body.atmospherePressureSeaLevel : 0;
 
 			double targetRadius = GoodLowOrbitRadius(body);
 			return SpeedAtPeriapsis(body, targetRadius, body.Radius)
@@ -307,27 +308,81 @@ namespace Astrogator {
 		/// <param name="searchStart">Minimum of the first interval to search</param>
 		/// <param name="searchEnd">Maximum of the first interval to search</param>
 		/// <returns>
-		/// Return value description
+		/// Departure UT for the chosen transfer window.
 		/// </returns>
 		public static double BurnTimeSearch(Orbit origOrb, Orbit destOrb, double searchStart, double searchEnd)
+			=> BurnTimeSearch(origOrb, destOrb, searchStart, searchEnd, searchStart, 0, 96);
+
+		/// <summary>
+		/// Like <see cref="BurnTimeSearch(Orbit, Orbit, double, double)"/> but constrains solutions to the future,
+		/// bounds total search effort, and can skip the first N valid windows (e.g. free-return uses the next window).
+		/// </summary>
+		/// <param name="earliestUT">Ignore roots before this UT (typically current time).</param>
+		/// <param name="windowSkip">Number of valid future solutions to skip; 0 = most efficient / soonest.</param>
+		/// <param name="maxIntervals">Maximum outer intervals to try before giving up.</param>
+		public static double BurnTimeSearch(
+			Orbit origOrb,
+			Orbit destOrb,
+			double searchStart,
+			double searchEnd,
+			double earliestUT,
+			int windowSkip,
+			int maxIntervals)
 		{
-			// Now we have a very rough approximation for the burn time.
-			// To do better, we define a function that calculates how close we are at arrival,
-			// then use the bisection method to solve for its root.
-			// Since that function requires a range, use the initial estimate to seed the
-			// range to search, and try later ranges until a solution is found.
-			double searchInterval = searchEnd - searchStart;
-			while (true) {
-				double adjustedBurnTime = OptimalTransferTime(
-					origOrb, destOrb, searchStart, searchEnd
-				);
-				if (!double.IsNaN(adjustedBurnTime)) {
-					return adjustedBurnTime;
-				} else {
-					searchStart = searchEnd;
-					searchEnd += searchInterval;
+			double searchInterval = Math.Max(searchEnd - searchStart, 1.0);
+			double fudge = 0.01 * Math.Min(origOrb.period, destOrb.period);
+
+			double windowLo = searchStart;
+			int intervalsTried = 0;
+			int skipped = 0;
+			double lastGood = double.NaN;
+
+			while (intervalsTried < maxIntervals) {
+				double windowHi = windowLo + searchInterval;
+				double t = OptimalTransferTime(
+					origOrb,
+					destOrb,
+					windowLo - fudge,
+					windowHi + fudge);
+
+				if (!double.IsNaN(t)) {
+					if (t < earliestUT) {
+						windowLo += searchInterval;
+						++intervalsTried;
+						continue;
+					}
+
+					lastGood = t;
+					if (skipped >= windowSkip) {
+						return t;
+					}
+
+					++skipped;
+					windowLo += searchInterval;
+					++intervalsTried;
+					continue;
 				}
+
+				windowLo += searchInterval;
+				++intervalsTried;
 			}
+
+			if (!double.IsNaN(lastGood)) {
+				return lastGood;
+			}
+
+			// Rare systems / edge cases: bounded search found nothing; try legacy widening (still capped).
+			double ss = searchStart, se = searchEnd;
+			for (int k = 0; k < 256; ++k) {
+				double t = OptimalTransferTime(origOrb, destOrb, ss, se);
+				if (!double.IsNaN(t)) {
+					return t;
+				}
+				ss = se;
+				se += searchInterval;
+			}
+
+			return double.NaN;
 		}
 
 		/// <summary>

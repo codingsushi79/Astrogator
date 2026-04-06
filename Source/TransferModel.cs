@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using KSP;
 using KSP.Localization;
@@ -64,6 +65,34 @@ namespace Astrogator {
 		/// </summary>
 		public double?       ejectionBurnDuration { get; private set; }
 
+		private CelestialBody AssistMoonForParent(CelestialBody parent)
+		{
+			if (parent?.orbitingBodies == null || parent.orbitingBodies.Count == 0) {
+				return null;
+			}
+			List<CelestialBody> moons = parent.orbitingBodies
+				.OrderBy(b => b?.orbit?.semiMajorAxis ?? double.MaxValue)
+				.ToList();
+			int idx = Settings.Instance.FreeReturnAssistBodyIndex % moons.Count;
+			return moons[idx];
+		}
+
+		private bool ShouldUseFreeReturnWindow(Orbit currentOrbit)
+		{
+			if (Settings.Instance.PathPlanMode != TransferPathPlanMode.FreeReturn) {
+				return false;
+			}
+			if (transferParent == null || currentOrbit.referenceBody != transferParent) {
+				return false;
+			}
+			CelestialBody destMoon = transferDestination as CelestialBody;
+			if (destMoon == null) {
+				return false;
+			}
+			CelestialBody assist = AssistMoonForParent(transferParent);
+			return assist != null && destMoon == assist;
+		}
+
 		private BurnModel PlotCaptureBurn(Orbit currentOrbit)
 		{
 			double now = Planetarium.GetUniversalTime();
@@ -104,10 +133,28 @@ namespace Astrogator {
 			double searchInterval = 0.5 * Math.PI / Math.Abs(phaseAnglePerSecond);
 
 			// Start searching immediately, will look at the next PI/2 and so on if not found
+			int windowSkip = ShouldUseFreeReturnWindow(currentOrbit)
+				? 1
+				: 0;
 			double ejectionBurnTime = BurnTimeSearch(
-				currentOrbit, transferDestination.GetOrbit(),
-				now, now + searchInterval
+				currentOrbit,
+				transferDestination.GetOrbit(),
+				now,
+				now + searchInterval,
+				now,
+				windowSkip,
+				96
 			);
+			if (double.IsNaN(ejectionBurnTime)) {
+				ejectionBurnTime = BurnTimeSearch(
+					currentOrbit,
+					transferDestination.GetOrbit(),
+					now,
+					now + searchInterval);
+			}
+			if (double.IsNaN(ejectionBurnTime)) {
+				return null;
+			}
 			double arrivalTime = ejectionBurnTime + TransferTravelTime(
 				currentOrbit, transferDestination.GetOrbit(), ejectionBurnTime
 			);
@@ -649,30 +696,77 @@ namespace Astrogator {
 					FlightGlobals.fetch.SetVesselTarget(destination);
 				}
 
-				// Create a maneuver node for the ejection burn
-				ejectionBurn.ToActiveManeuver();
+				bool mergedPlaneIntoEjection = false;
 
-				if (Settings.Instance.GeneratePlaneChangeBurns) {
+				if (Settings.Instance.MergePlaneChangeIntoEjection
+						&& Settings.Instance.GeneratePlaneChangeBurns
+						&& ejectionBurn != null
+						&& ejectionBurn.atTime != null
+						&& transferDestination != null
+						&& transferParent != null) {
+
 					if (planeChangeBurn == null) {
-						DbgFmt("Calculating plane change on the fly");
+						DbgFmt("Calculating plane change on the fly for merge");
 						CalculatePlaneChangeBurn();
 					}
 
 					if (planeChangeBurn != null) {
-						planeChangeBurn.ToActiveManeuver();
-					} else {
-						DbgFmt("No plane change found");
+						ManeuverNode eNode = ejectionBurn.ToActiveManeuver();
+						if (eNode != null) {
+							for (Orbit o = eNode.nextPatch; o != null; o = NextPatch(o)) {
+								if (o.referenceBody == transferParent) {
+									Vector3d planeDV = DeltaVToMatchPlanes(
+										o,
+										transferDestination.GetOrbit(),
+										ejectionBurn.atTime.Value);
+									Vector3d merged = new Vector3d(
+										planeDV.x + ejectionBurn.radial,
+										planeDV.y + ejectionBurn.normal,
+										planeDV.z + ejectionBurn.prograde);
+									ejectionBurn.RemoveNode();
+									ejectionBurn = new BurnModel(ejectionBurn.atTime, merged);
+									ejectionBurn.ToActiveManeuver();
+									planeChangeBurn = null;
+									mergedPlaneIntoEjection = true;
+									GetDuration();
+									DbgFmt("Merged plane change into ejection maneuver");
+									break;
+								}
+							}
+							if (!mergedPlaneIntoEjection) {
+								DbgFmt("Could not merge plane change; using separate nodes");
+								ejectionBurn.RemoveNode();
+							}
+						}
 					}
-				} else {
-					DbgFmt("Plane changes disabled");
+				}
+
+				if (!mergedPlaneIntoEjection) {
+					ejectionBurn.ToActiveManeuver();
+
+					if (Settings.Instance.GeneratePlaneChangeBurns) {
+						if (planeChangeBurn == null) {
+							DbgFmt("Calculating plane change on the fly");
+							CalculatePlaneChangeBurn();
+						}
+
+						if (planeChangeBurn != null) {
+							planeChangeBurn.ToActiveManeuver();
+						} else {
+							DbgFmt("No plane change found");
+						}
+					} else {
+						DbgFmt("Plane changes disabled");
+					}
 				}
 
 				if (Settings.Instance.AutoEditEjectionNode) {
-					// Open the initial node for fine tuning
 					ejectionBurn.EditNode();
 				} else if (Settings.Instance.AutoEditPlaneChangeNode) {
 					if (planeChangeBurn != null) {
 						planeChangeBurn.EditNode();
+					} else if (mergedPlaneIntoEjection) {
+						ejectionBurn.EditNode();
 					}
 				}
 

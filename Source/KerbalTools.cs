@@ -222,6 +222,26 @@ namespace Astrogator {
 		}
 
 		/// <summary>
+		/// Display name suitable for mid-sentence UI (e.g. table rows). Drops a leading English "The "
+		/// from localized celestial body titles so phrases like "Transfers to the Mun" read naturally.
+		/// </summary>
+		public static string DisplayNameMidSentence(ITargetable target)
+		{
+			if (target == null) {
+				return "NULL";
+			}
+			CelestialBody cb = target as CelestialBody;
+			if (cb != null) {
+				string dn = cb.GetDisplayName();
+				if (dn.StartsWith("The ", StringComparison.Ordinal)) {
+					return dn.Substring(4);
+				}
+				return dn;
+			}
+			return target.GetDisplayName() ?? target.GetName() ?? "NULL";
+		}
+
+		/// <summary>
 		/// Determine a starting point for finding destination bodies.
 		/// </summary>
 		/// <param name="target">Body or vessel to use</param>

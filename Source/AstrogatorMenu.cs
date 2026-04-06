@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Text;
 using System.Globalization;
 using System.Collections.Generic;
@@ -65,6 +66,18 @@ namespace Astrogator {
 		[KSPField]
 		public int buttonLeft = 6;
 
+		/// <summary>
+		/// Optional: cycle efficient vs free-return path mode (maps to a spare MFD button in prop configs).
+		/// </summary>
+		[KSPField]
+		public int buttonPathMode = 7;
+
+		/// <summary>
+		/// Optional: cycle which moon is the free-return assist target (same parent as vessel).
+		/// </summary>
+		[KSPField]
+		public int buttonCycleAssistMoon = 8;
+
 		private AstrogationModel            model             { get; set; }
 		private AstrogationLoadBehaviorette loader            { get; set; }
 		private List<DateTimeParts>         timeToWait        { get; set; } = new List<DateTimeParts>();
@@ -92,6 +105,41 @@ namespace Astrogator {
 			));
 			sb.Append(Environment.NewLine);
 			sb.Append(Environment.NewLine);
+			sb.Append(centerString(RpmPathPlanLine(), columns, ' '));
+			sb.Append(Environment.NewLine);
+			sb.Append(Environment.NewLine);
+		}
+
+		private string RpmPathPlanLine()
+		{
+			string mode = Settings.Instance.PathPlanMode == TransferPathPlanMode.FreeReturn
+				? Localizer.Format("astrogator_pathPlanModeFreeReturnShort")
+				: Localizer.Format("astrogator_pathPlanModeEfficientShort");
+			Vessel v = FlightGlobals.ActiveVessel;
+			string moon = Localizer.Format("astrogator_pathPlanAssistUnknown");
+			if (v?.orbit?.referenceBody != null) {
+				CelestialBody p = v.orbit.referenceBody;
+				if (p.orbitingBodies != null && p.orbitingBodies.Count > 0) {
+					var moons = p.orbitingBodies
+						.OrderBy(b => b?.orbit?.semiMajorAxis ?? double.MaxValue)
+						.ToList();
+					int idx = Settings.Instance.FreeReturnAssistBodyIndex % moons.Count;
+					moon = DisplayNameMidSentence(moons[idx]);
+				}
+			}
+			return Localizer.Format("astrogator_rpmPathPlanLine", mode, moon);
+		}
+
+		private void RpmReloadAfterSettingChange()
+		{
+			Settings.Instance.Save();
+			lastUniversalTime = double.NegativeInfinity;
+			cursorMoved = true;
+			if (model != null) {
+				ITargetable o = model.origin ?? GetBestOrigin();
+				model.Reset(o);
+				loader?.TryStartLoad(o, null, null, null, true);
+			}
 		}
 
 		private void addHeaders(StringBuilder sb)
@@ -161,7 +209,7 @@ namespace Astrogator {
 
 		private void addRow(StringBuilder sb, TransferModel m, DateTimeParts dt, bool selected)
 		{
-			string destLabel = Localizer.Format("astrogator_planetLabel", TheName(m.destination));
+			string destLabel = Localizer.Format("astrogator_planetLabel", DisplayNameMidSentence(m.destination));
 
 			sb.Append(Environment.NewLine);
 			sb.Append(selected ? "> " : "  ");
@@ -298,7 +346,7 @@ namespace Astrogator {
 						cursorTransfer -= transfers.Count;
 					}
 
-					rowsPerPage = rows - 4;
+					rowsPerPage = Math.Max(1, rows - 6);
 					int screenPage = cursorTransfer / rowsPerPage;
 					for (int t = screenPage * rowsPerPage, r = 0;
 							t < transfers.Count && r < rowsPerPage;
@@ -386,6 +434,19 @@ namespace Astrogator {
 					cursorTransfer = transfers.Count - 1;
 				}
 				cursorMoved = true;
+			} else if (activeButton == buttonPathMode) {
+				Settings.Instance.PathPlanMode = Settings.Instance.PathPlanMode == TransferPathPlanMode.Efficient
+					? TransferPathPlanMode.FreeReturn
+					: TransferPathPlanMode.Efficient;
+				RpmReloadAfterSettingChange();
+			} else if (activeButton == buttonCycleAssistMoon) {
+				Vessel v = FlightGlobals.ActiveVessel;
+				int n = v?.orbit?.referenceBody?.orbitingBodies?.Count ?? 0;
+				if (n > 0) {
+					Settings.Instance.FreeReturnAssistBodyIndex =
+						(Settings.Instance.FreeReturnAssistBodyIndex + 1) % n;
+				}
+				RpmReloadAfterSettingChange();
 			}
 		}
 

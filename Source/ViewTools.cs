@@ -1115,12 +1115,12 @@ namespace Astrogator {
 				if (model.inbound) {
 					return Localizer.Format(
 						"astrogator_inboundHyperbolicWarning",
-						TheName(model.origin)
+						DisplayNameMidSentence(model.origin)
 					);
 				} else {
 					return Localizer.Format(
 						"astrogator_outboundHyperbolicError",
-						TheName(model.origin)
+						DisplayNameMidSentence(model.origin)
 					);
 				}
 			} else if (model.badInclination) {
@@ -1138,11 +1138,11 @@ namespace Astrogator {
 				}
 				return Localizer.Format(
 					"astrogator_launchSubtitle",
-					TheName(model.origin),
+					DisplayNameMidSentence(model.origin),
 					FormatSpeed(DeltaVToOrbit(b), Settings.Instance.DisplayUnits)
 				);
 			} else {
-				return Localizer.Format("astrogator_normalSubtitle", TheName(model.origin));
+				return Localizer.Format("astrogator_normalSubtitle", DisplayNameMidSentence(model.origin));
 			}
 		}
 	}

@@ -261,9 +261,13 @@ namespace Astrogator {
 				lock (bgLoadMutex) {
 					double now = Planetarium.GetUniversalTime();
 					for (int i = 0; i < model.transfers.Count; ++i) {
-						if (model.transfers[i].ejectionBurn != null
-								&& model.transfers[i].ejectionBurn.atTime != null
-								&& model.transfers[i].ejectionBurn.atTime < now) {
+						double? bt = model.transfers[i].ejectionBurn?.atTime;
+						if (bt == null) {
+							continue;
+						}
+						double period = model.transfers[i].origin?.GetOrbit()?.period ?? 86400;
+						double grace = Math.Max(60.0, 0.002 * period);
+						if (bt.Value + grace < now) {
 
 							DbgFmt("Recalculating expired burn");
 							found = true;

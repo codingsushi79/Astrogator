@@ -143,6 +143,25 @@ namespace Astrogator {
 					internalWidth
 				));
 
+				AddChild(new WrappingToggle(
+					() => Settings.Instance.PathPlanMode == TransferPathPlanMode.FreeReturn,
+					Localizer.Format("astrogator_pathPlanFreeReturnSetting"),
+					(bool b) => {
+						Settings.Instance.PathPlanMode = b
+							? TransferPathPlanMode.FreeReturn
+							: TransferPathPlanMode.Efficient;
+						resetCallback(true);
+					},
+					internalWidth
+				));
+
+				AddChild(new WrappingToggle(
+					() => Settings.Instance.MergePlaneChangeIntoEjection,
+					Localizer.Format("astrogator_mergePlaneChangeSetting"),
+					(bool b) => { Settings.Instance.MergePlaneChangeIntoEjection = b; },
+					internalWidth
+				));
+
 				AddChild(LabelWithStyleAndSize(
 					Localizer.Format("astrogator_unitsHeader"),
 					midHdrStyle,

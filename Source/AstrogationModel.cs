@@ -250,9 +250,19 @@ namespace Astrogator {
 
 		/// <summary>
 		/// Find the transfer that currently has an ejection burn instantiated as a real maneuver node, if any.
+		/// Prefers the transfer whose destination matches the current nav target so translation keys
+		/// still adjust the right node when another encounter adds extra patches.
 		/// </summary>
 		public TransferModel ActiveTransfer {
 			get {
+				ITargetable vt = FlightGlobals.fetch?.VesselTarget;
+				if (vt != null) {
+					for (int i = 0; i < transfers.Count; ++i) {
+						if (transfers[i].destination == vt && transfers[i].ejectionBurn?.node != null) {
+							return transfers[i];
+						}
+					}
+				}
 				for (int i = 0; i < transfers.Count; ++i) {
 					if (transfers[i].ejectionBurn?.node != null) {
 						return transfers[i];
